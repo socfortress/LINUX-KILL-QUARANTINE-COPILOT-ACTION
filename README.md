@@ -1,10 +1,10 @@
-## Kill Suspicious Process
+## Kill-Suspicious-Process.sh
 
-This script terminates a specified process by PID, providing a JSON-formatted output for integration with security tools like OSSEC/Wazuh.
+This script terminates a specified process by PID, providing a JSON-formatted output for integration with your SIEM.
 
 ### Overview
 
-The `Kill-Suspicious-Process` script attempts to kill a process by its PID, records the executable path, and outputs the result in JSON format for active response workflows.
+The `Kill-Suspicious-Process.sh` script attempts to kill a process by its PID, records the executable path, and outputs the result in JSON format for active response workflows.
 
 ### Script Details
 
@@ -20,7 +20,7 @@ The `Kill-Suspicious-Process` script attempts to kill a process by its PID, reco
 
 #### Command Line Execution
 ```bash
-./Kill-Suspicious-Process <pid>
+./Kill-Suspicious-Process.sh <pid>
 ```
 
 #### Parameters
@@ -55,7 +55,7 @@ The `Kill-Suspicious-Process` script attempts to kill a process by its PID, reco
 {
   "timestamp": "2025-07-18T10:30:45.123Z",
   "host": "HOSTNAME",
-  "action": "Kill-Suspicious-Process",
+  "action": "Kill-Suspicious-Process.sh",
   "pid": "1234",
   "exe": "/usr/bin/malware",
   "status": "killed",
@@ -69,7 +69,7 @@ The `Kill-Suspicious-Process` script attempts to kill a process by its PID, reco
 {
   "timestamp": "2025-07-18T10:30:45.123Z",
   "host": "HOSTNAME",
-  "action": "Kill-Suspicious-Process",
+  "action": "Kill-Suspicious-Process.sh",
   "pid": "1234",
   "exe": "/usr/bin/malware",
   "status": "failed",
