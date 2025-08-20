@@ -43,7 +43,7 @@ jq -n --arg timestamp "$Timestamp" \
       --arg exe "$ExePath" \
       --arg status "$Status" \
       --arg reason "$Reason" \
-      --argjson copilot_soar true \
+      --argjson copilot_action true \
       '{
         timestamp: $timestamp,
         host: $host,
@@ -52,7 +52,7 @@ jq -n --arg timestamp "$Timestamp" \
         exe: $exe,
         status: $status,
         reason: $reason,
-        copilot_soar: $copilot_soar
+        copilot_action: $copilot_action
       }' > "$LogTemp"
 
 if mv -f "$LogTemp" "$LOG"; then
