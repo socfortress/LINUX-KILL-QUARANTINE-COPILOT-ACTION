@@ -1,0 +1,19 @@
+{
+  "active_response_name": "LINUX-KILL-QUARANTINE-ACTIVERESPONSE",
+  "description": "LINUX-KILL-QUARANTINE-ACTIVERESPONSE.",
+  "technology": "Linux",
+  "icon": "Linux",
+  "script_parameters": [
+    {
+      "name": "RunID",
+      "type": "string",
+      "required": false,
+      "description": "Unique run identifier for log correlation",
+      "default": null
+    }
+  ],
+  "repo_url": "https://github.com/socfortress/WINDOWS-LIST-RUNNING-APPS-ACTIVERESPONSE",
+  "script_name": "List-Running-Apps.ps1",
+  "version": "1.0.0",
+  "last_updated": "2025-08-20T00:00:00Z"
+}
