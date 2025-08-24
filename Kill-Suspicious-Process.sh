@@ -1,66 +1,104 @@
 #!/bin/bash
 set -eu
 
-PID="$1"
-LOG="/var/ossec/active-response/active-responses.log"
+ScriptName="Kill-Suspicious-Process"
+LogPath="/tmp/${ScriptName}-script.log"
+ARLog="/var/ossec/active-response/active-responses.log"
+LogMaxKB=100
+LogKeep=5
 HostName="$(hostname)"
-LogTemp="/tmp/kill_process.log"
-RunStart=$(date +%s)
+RunStart="$(date +%s)"
 
-if [[ -z "$PID" ]]; then
-  echo "Usage: $0 <pid>"
+PID="${1:-}"
+
+WriteLog() {
+  msg="$1"; lvl="${2:-INFO}"
+  ts="$(date '+%Y-%m-%d %H:%M:%S%z')"
+  line="[$ts][$lvl] $msg"
+  printf '%s\n' "$line" >&2
+  printf '%s\n' "$line" >> "$LogPath"
+}
+
+RotateLog() {
+  [ -f "$LogPath" ] || return 0
+  size_kb=$(awk -v s="$(wc -c <"$LogPath")" 'BEGIN{printf "%.0f", s/1024}')
+  [ "$size_kb" -le "$LogMaxKB" ] && return 0
+  i=$((LogKeep-1))
+  while [ $i -ge 1 ]; do
+    src="$LogPath.$i"; dst="$LogPath.$((i+1))"
+    [ -f "$src" ] && mv -f "$src" "$dst" || true
+    i=$((i-1))
+  done
+  mv -f "$LogPath" "$LogPath.1"
+}
+
+escape_json() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+BeginNDJSON() {
+  TMP_AR="$(mktemp)"
+}
+
+AddRecord() {
+  ts="$(date '+%Y-%m-%d %H:%M:%S%z')"
+  pid="$(escape_json "$1")"
+  exe="$(escape_json "$2")"
+  status="$(escape_json "$3")"
+  reason="$(escape_json "$4")"
+  printf '{"timestamp":"%s","host":"%s","action":"%s","copilot_action":true,"pid":"%s","exe":"%s","status":"%s","reason":"%s"}\n' \
+    "$ts" "$HostName" "$ScriptName" "$pid" "$exe" "$status" "$reason" >> "$TMP_AR"
+}
+
+CommitNDJSON() {
+  if mv -f "$TMP_AR" "$ARLog" 2>/dev/null; then
+    :
+  else
+    mv -f "$TMP_AR" "$ARLog.new" 2>/dev/null || printf '{"timestamp":"%s","host":"%s","action":"%s","copilot_action":true,"status":"error","message":"atomic move failed"}\n' "$(date '+%Y-%m-%d %H:%M:%S%z')" "$HostName" "$ScriptName" > "$ARLog.new"
+  fi
+}
+
+RotateLog
+WriteLog "START $ScriptName"
+
+if [ -z "$PID" ]; then
+  WriteLog "Missing PID argument" "ERROR"
+  BeginNDJSON
+  AddRecord "unknown" "unknown" "failed" "Missing PID argument"
+  CommitNDJSON
   exit 1
 fi
 
-function Write-Log {
-  local level="$1"
-  local message="$2"
-  local ts
-  ts=$(date '+%Y-%m-%d %H:%M:%S')
-  echo "[$ts][$level] $message"
-}
+case "$PID" in
+  ''|*[!0-9]*) WriteLog "PID must be numeric: '$PID'" "ERROR"
+               BeginNDJSON; AddRecord "$PID" "unknown" "failed" "PID not numeric"; CommitNDJSON; exit 1 ;;
+esac
 
-Write-Log "INFO" "=== SCRIPT START : Kill-Suspicious-Process ==="
-Write-Log "INFO" "Attempting to kill process PID=$PID"
+ExePath="unknown"
+if [ -r "/proc/$PID/exe" ]; then
+  ExePath="$(readlink -f "/proc/$PID/exe" 2>/dev/null || echo "unknown")"
+fi
 
-ExePath=$(readlink -f "/proc/$PID/exe" 2>/dev/null || echo "unknown")
+WriteLog "Attempting to kill PID=$PID (exe: ${ExePath})" "INFO"
+
+Status="failed"
+Reason="Failed to kill process"
 
 if kill -9 "$PID" 2>/dev/null; then
-  Write-Log "INFO" "Process $PID killed successfully (exe: $ExePath)"
   Status="killed"
-  Reason="Process killed successfully"
+  Reason="Process killed successfully with SIGKILL (-9)"
 else
-  Write-Log "ERROR" "Failed to kill process $PID (exe: $ExePath)"
-  Status="failed"
-  Reason="Failed to kill process"
+  if kill -0 "$PID" 2>/dev/null; then
+    Reason="Kill signal sent failed or insufficient permissions"
+  else
+    Status="killed"
+    Reason="Process not present after kill attempt (may have already exited)"
+  fi
 fi
 
-Timestamp=$(date -Iseconds)
-jq -n --arg timestamp "$Timestamp" \
-      --arg host "$HostName" \
-      --arg action "Kill-Suspicious-Process" \
-      --arg pid "$PID" \
-      --arg exe "$ExePath" \
-      --arg status "$Status" \
-      --arg reason "$Reason" \
-      --argjson copilot_action true \
-      '{
-        timestamp: $timestamp,
-        host: $host,
-        action: $action,
-        pid: $pid,
-        exe: $exe,
-        status: $status,
-        reason: $reason,
-        copilot_action: $copilot_action
-      }' > "$LogTemp"
-
-if mv -f "$LogTemp" "$LOG"; then
-  Write-Log "INFO" "Log file replaced at $LOG"
-else
-  mv -f "$LogTemp" "$LOG.new"
-  Write-Log "WARN" "Log file locked, wrote results to $LOG.new"
-fi
+BeginNDJSON
+AddRecord "$PID" "$ExePath" "$Status" "$Reason"
+CommitNDJSON
 
 Duration=$(( $(date +%s) - RunStart ))
-Write-Log "INFO" "=== SCRIPT END : duration ${Duration}s ==="
+WriteLog "END $ScriptName in ${Duration}s"
