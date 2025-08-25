@@ -9,10 +9,8 @@ LogKeep=5
 HostName="$(hostname)"
 RunStart="$(date +%s)"
 
-PID="${1:-}"
-
-# Map Velociraptor arguments (ARG1 -> PID)
-[ -n "${ARG1:-}" ] && [ -z "$PID" ] && PID="$ARG1"
+# Prefer ARG1 from Velociraptor, fallback to $1
+PID="${ARG1:-${1:-}}"
 
 WriteLog() {
   msg="$1"; lvl="${2:-INFO}"
