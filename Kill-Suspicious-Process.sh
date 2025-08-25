@@ -11,6 +11,9 @@ RunStart="$(date +%s)"
 
 PID="${1:-}"
 
+# Map Velociraptor arguments (ARG1 -> PID)
+[ -n "${ARG1:-}" ] && [ -z "$PID" ] && PID="$ARG1"
+
 WriteLog() {
   msg="$1"; lvl="${2:-INFO}"
   ts="$(date '+%Y-%m-%d %H:%M:%S%z')"
@@ -61,6 +64,7 @@ CommitNDJSON() {
 RotateLog
 WriteLog "START $ScriptName"
 
+# Validate PID
 if [ -z "$PID" ]; then
   WriteLog "Missing PID argument" "ERROR"
   BeginNDJSON
@@ -89,7 +93,7 @@ if kill -9 "$PID" 2>/dev/null; then
   Reason="Process killed successfully with SIGKILL (-9)"
 else
   if kill -0 "$PID" 2>/dev/null; then
-    Reason="Kill signal sent failed or insufficient permissions"
+    Reason="Kill signal failed or insufficient permissions"
   else
     Status="killed"
     Reason="Process not present after kill attempt (may have already exited)"
