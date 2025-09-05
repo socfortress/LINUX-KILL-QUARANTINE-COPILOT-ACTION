@@ -8,8 +8,6 @@ LogMaxKB=100
 LogKeep=5
 HostName="$(hostname)"
 RunStart="$(date +%s)"
-
-# Prefer ARG1 from Velociraptor, fallback to $1
 PID="${ARG1:-${1:-}}"
 
 WriteLog() {
@@ -86,13 +84,10 @@ CommitNDJSON(){
 RotateLog
 WriteLog "=== SCRIPT START : $ScriptName (host=$HostName) ==="
 
-# Validate PID argument
 if [ -z "${PID:-}" ]; then
   BeginNDJSON; AddStatus "error" "Missing PID argument"; CommitNDJSON; exit 1
 fi
 case "$PID" in *[!0-9]* ) BeginNDJSON; AddStatus "error" "PID must be numeric: '$PID'"; CommitNDJSON; exit 1 ;; esac
-
-# Safeguards
 if [ "$PID" -eq 1 ] || [ "$PID" -eq $$ ] || [ "$PID" -eq "$PPID" ]; then
   BeginNDJSON
   AddRecord "$PID" "" "" "" "skipped" "Refusing to kill critical/self PID"
@@ -100,8 +95,6 @@ if [ "$PID" -eq 1 ] || [ "$PID" -eq $$ ] || [ "$PID" -eq "$PPID" ]; then
   Duration=$(( $(date +%s) - RunStart )); WriteLog "=== SCRIPT END : ${Duration}s ==="
   exit 0
 fi
-
-# Gather context (best-effort)
 USER_NAME="$(stat -c '%U' "/proc/$PID" 2>/dev/null || echo unknown)"
 CMD_RAW="$(tr '\0' ' ' < "/proc/$PID/cmdline" 2>/dev/null || cat "/proc/$PID/comm" 2>/dev/null || echo "")"
 CMD="${CMD_RAW% }"
@@ -119,7 +112,6 @@ fi
 WriteLog "Attempting graceful terminate (TERM) for PID=$PID (exe: $EXE)" INFO
 STATUS="failed"; REASON="Unknown failure"
 
-# Try TERM, wait up to 5s
 if kill "$PID" 2>/dev/null; then
   for i in 1 2 3 4 5; do
     sleep 1
@@ -132,7 +124,6 @@ else
   REASON="SIGTERM not sent (permission or other error)"
 fi
 
-# If still alive, try KILL
 if [ "$STATUS" != "killed" ]; then
   WriteLog "Escalating to SIGKILL (-9) for PID=$PID" WARN
   if kill -9 "$PID" 2>/dev/null; then
@@ -143,7 +134,6 @@ if [ "$STATUS" != "killed" ]; then
       STATUS="failed"; REASON="SIGKILL sent but process still alive"
     fi
   else
-    # Could be no permission or already gone
     if kill -0 "$PID" 2>/dev/null; then
       STATUS="failed"; REASON="Insufficient permissions to kill process"
     else
