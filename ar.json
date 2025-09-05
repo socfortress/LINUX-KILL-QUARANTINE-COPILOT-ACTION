@@ -9,7 +9,8 @@
       "type": "integer",
       "required": true,
       "description": "Process ID (PID) of the target process to terminate.",
-      "default": null
+      "default": null,
+      "arg_position" : "1"
     },
     {
       "name": "ARLog",
