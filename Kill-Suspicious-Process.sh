@@ -3,7 +3,7 @@ set -eu
 
 ScriptName="Kill-Suspicious-Process"
 LogPath="/tmp/${ScriptName}-script.log"
-ARLog="/var/ossec/active-response/active-responses.log"
+ARLog="/var/ossec/logs/active-responses.log"
 LogMaxKB=100
 LogKeep=5
 HostName="$(hostname)"
@@ -17,7 +17,7 @@ WriteLog() {
   ts="$(date '+%Y-%m-%d %H:%M:%S%z')"
   line="[$ts][$lvl] $msg"
   printf '%s\n' "$line" >&2
-  printf '%s\n' "$line" >> "$LogPath"
+  printf '%s\n' "$line" >> "$LogPath" 2>/dev/null || true
 }
 
 RotateLog() {
@@ -33,74 +33,128 @@ RotateLog() {
   mv -f "$LogPath" "$LogPath.1"
 }
 
-escape_json() {
-  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+escape_json(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+iso_now(){ date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+
+BeginNDJSON(){ TMP_AR="$(mktemp)"; }
+
+AddRecord(){
+  ts="$(iso_now)"
+  pid="$(escape_json "${1:-unknown}")"
+  user="$(escape_json "${2:-unknown}")"
+  cmd="$(escape_json "${3:-unknown}")"
+  exe="$(escape_json "${4:-unknown}")"
+  status="$(escape_json "${5:-unknown}")"
+  reason="$(escape_json "${6:-}")"
+  printf '{"timestamp":"%s","host":"%s","action":"%s","copilot_action":true,"pid":"%s","user":"%s","cmd":"%s","exe":"%s","status":"%s","reason":"%s"}\n' \
+    "$ts" "$HostName" "$ScriptName" "$pid" "$user" "$cmd" "$exe" "$status" "$reason" >> "$TMP_AR"
 }
 
-BeginNDJSON() {
-  TMP_AR="$(mktemp)"
+AddStatus(){
+  ts="$(iso_now)"; st="${1:-info}"; msg="$(escape_json "${2:-}")"
+  printf '{"timestamp":"%s","host":"%s","action":"%s","copilot_action":true,"status":"%s","message":"%s"}\n' \
+    "$ts" "$HostName" "$ScriptName" "$st" "$msg" >> "$TMP_AR"
 }
 
-AddRecord() {
-  ts="$(date '+%Y-%m-%d %H:%M:%S%z')"
-  pid="$(escape_json "$1")"
-  exe="$(escape_json "$2")"
-  status="$(escape_json "$3")"
-  reason="$(escape_json "$4")"
-  printf '{"timestamp":"%s","host":"%s","action":"%s","copilot_action":true,"pid":"%s","exe":"%s","status":"%s","reason":"%s"}\n' \
-    "$ts" "$HostName" "$ScriptName" "$pid" "$exe" "$status" "$reason" >> "$TMP_AR"
-}
-
-CommitNDJSON() {
+CommitNDJSON(){
+  AR_DIR="$(dirname "$ARLog")"
+  [ -d "$AR_DIR" ] || WriteLog "Directory missing: $AR_DIR (will attempt write anyway)" WARN
   if mv -f "$TMP_AR" "$ARLog" 2>/dev/null; then
     :
   else
-    mv -f "$TMP_AR" "$ARLog.new" 2>/dev/null || printf '{"timestamp":"%s","host":"%s","action":"%s","copilot_action":true,"status":"error","message":"atomic move failed"}\n' "$(date '+%Y-%m-%d %H:%M:%S%z')" "$HostName" "$ScriptName" > "$ARLog.new"
+    WriteLog "Primary write FAILED to $ARLog" WARN
+    if mv -f "$TMP_AR" "$ARLog.new" 2>/dev/null; then
+      WriteLog "Wrote NDJSON to $ARLog.new (fallback)" WARN
+    else
+      keep="/tmp/active-responses.$$.ndjson"
+      cp -f "$TMP_AR" "$keep" 2>/dev/null || true
+      WriteLog "Failed to write both $ARLog and $ARLog.new; saved $keep" ERROR
+      rm -f "$TMP_AR" 2>/dev/null || true
+      exit 1
+    fi
   fi
+  for p in "$ARLog" "$ARLog.new"; do
+    if [ -f "$p" ]; then
+      sz=$(wc -c < "$p" 2>/dev/null || echo 0)
+      ino=$(ls -li "$p" 2>/dev/null | awk '{print $1}')
+      head1=$(head -n1 "$p" 2>/dev/null || true)
+      WriteLog "VERIFY: path=$p inode=$ino size=${sz}B first_line=${head1:-<empty>}" INFO
+    fi
+  done
 }
 
 RotateLog
-WriteLog "START $ScriptName"
+WriteLog "=== SCRIPT START : $ScriptName (host=$HostName) ==="
 
-# Validate PID
-if [ -z "$PID" ]; then
-  WriteLog "Missing PID argument" "ERROR"
+# Validate PID argument
+if [ -z "${PID:-}" ]; then
+  BeginNDJSON; AddStatus "error" "Missing PID argument"; CommitNDJSON; exit 1
+fi
+case "$PID" in *[!0-9]* ) BeginNDJSON; AddStatus "error" "PID must be numeric: '$PID'"; CommitNDJSON; exit 1 ;; esac
+
+# Safeguards
+if [ "$PID" -eq 1 ] || [ "$PID" -eq $$ ] || [ "$PID" -eq "$PPID" ]; then
   BeginNDJSON
-  AddRecord "unknown" "unknown" "failed" "Missing PID argument"
+  AddRecord "$PID" "" "" "" "skipped" "Refusing to kill critical/self PID"
   CommitNDJSON
-  exit 1
+  Duration=$(( $(date +%s) - RunStart )); WriteLog "=== SCRIPT END : ${Duration}s ==="
+  exit 0
 fi
 
-case "$PID" in
-  ''|*[!0-9]*) WriteLog "PID must be numeric: '$PID'" "ERROR"
-               BeginNDJSON; AddRecord "$PID" "unknown" "failed" "PID not numeric"; CommitNDJSON; exit 1 ;;
-esac
+# Gather context (best-effort)
+USER_NAME="$(stat -c '%U' "/proc/$PID" 2>/dev/null || echo unknown)"
+CMD_RAW="$(tr '\0' ' ' < "/proc/$PID/cmdline" 2>/dev/null || cat "/proc/$PID/comm" 2>/dev/null || echo "")"
+CMD="${CMD_RAW% }"
+EXE=""; [ -L "/proc/$PID/exe" ] && EXE="$(readlink -f "/proc/$PID/exe" 2>/dev/null || true)"
+[ -n "$EXE" ] || EXE="unknown"
 
-ExePath="unknown"
-if [ -r "/proc/$PID/exe" ]; then
-  ExePath="$(readlink -f "/proc/$PID/exe" 2>/dev/null || echo "unknown")"
+if ! kill -0 "$PID" 2>/dev/null; then
+  BeginNDJSON
+  AddRecord "$PID" "$USER_NAME" "$CMD" "$EXE" "not_found" "Process does not exist"
+  CommitNDJSON
+  Duration=$(( $(date +%s) - RunStart )); WriteLog "=== SCRIPT END : ${Duration}s ==="
+  exit 0
 fi
 
-WriteLog "Attempting to kill PID=$PID (exe: ${ExePath})" "INFO"
+WriteLog "Attempting graceful terminate (TERM) for PID=$PID (exe: $EXE)" INFO
+STATUS="failed"; REASON="Unknown failure"
 
-Status="failed"
-Reason="Failed to kill process"
-
-if kill -9 "$PID" 2>/dev/null; then
-  Status="killed"
-  Reason="Process killed successfully with SIGKILL (-9)"
+# Try TERM, wait up to 5s
+if kill "$PID" 2>/dev/null; then
+  for i in 1 2 3 4 5; do
+    sleep 1
+    if ! kill -0 "$PID" 2>/dev/null; then
+      STATUS="killed"; REASON="Terminated with SIGTERM"
+      break
+    fi
+  done
 else
-  if kill -0 "$PID" 2>/dev/null; then
-    Reason="Kill signal failed or insufficient permissions"
+  REASON="SIGTERM not sent (permission or other error)"
+fi
+
+# If still alive, try KILL
+if [ "$STATUS" != "killed" ]; then
+  WriteLog "Escalating to SIGKILL (-9) for PID=$PID" WARN
+  if kill -9 "$PID" 2>/dev/null; then
+    sleep 1
+    if ! kill -0 "$PID" 2>/dev/null; then
+      STATUS="killed"; REASON="Killed with SIGKILL"
+    else
+      STATUS="failed"; REASON="SIGKILL sent but process still alive"
+    fi
   else
-    Status="killed"
-    Reason="Process not present after kill attempt (may have already exited)"
+    # Could be no permission or already gone
+    if kill -0 "$PID" 2>/dev/null; then
+      STATUS="failed"; REASON="Insufficient permissions to kill process"
+    else
+      STATUS="killed"; REASON="Process exited during attempt"
+    fi
   fi
 fi
 
 BeginNDJSON
-AddRecord "$PID" "$ExePath" "$Status" "$Reason"
+AddRecord "$PID" "$USER_NAME" "$CMD" "$EXE" "$STATUS" "$REASON"
 CommitNDJSON
 
 Duration=$(( $(date +%s) - RunStart ))
-WriteLog "END $ScriptName in ${Duration}s"
+WriteLog "=== SCRIPT END : ${Duration}s ==="
