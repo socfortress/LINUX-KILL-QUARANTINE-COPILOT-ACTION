@@ -1,6 +1,6 @@
 {
-  "copilot_action_name": "LINUX-KILL-QUARANTINE-COPILOT-ACTION",
-  "description": "Terminates a specified process by PID and records full contextual details for auditing. Resolves the executable path, attempts a forceful kill (-9), and logs the result including PID, executable path, kill status, and reason. Produces atomic NDJSON output with a .new fallback when the Active Response log is locked.",
+  "copilot_action_name": "LINUX-KILL-SUSPICIOUS-PROCESS-COPILOT-ACTION",
+  "description": "Terminates a specified Linux process by PID with a safe escalation (SIGTERM, then SIGKILL if needed). Captures user, command line, executable path, final status, and reason, and writes atomic NDJSON to the Active Response log with .new fallback.",
   "technology": "Linux",
   "icon": "linux",
   "script_parameters": [
@@ -8,19 +8,11 @@
       "name": "PID",
       "type": "integer",
       "required": true,
-      "description": "Process ID (PID) of the target process to terminate.",
-      "default": null,
-      "arg_position" : "1"
-    },
-    {
-      "name": "ARLog",
-      "type": "string",
-      "required": false,
-      "description": "Active Response NDJSON output path (atomic overwrite; falls back to .new if locked).",
-      "default": "/var/ossec/active-response/active-responses.log"
+      "description": "Process ID to terminate.",
+      "arg_position": "1"
     }
   ],
-  "repo_url": "https://raw.githubusercontent.com/socfortress/LINUX-KILL-QUARANTINE-COPILOT-ACTION/refs/heads/main/",
+  "repo_url": "https://raw.githubusercontent.com/socfortress/LINUX-KILL-QUARANTINE-COPILOT-ACTION/refs/heads/main/Kill-Suspicious-Process.sh",
   "script_name": "Kill-Suspicious-Process.sh",
   "version": "1.0.0",
   "last_updated": "2025-08-22T00:00:00Z"
